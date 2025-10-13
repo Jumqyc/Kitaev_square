@@ -1,0 +1,33 @@
+cmake_minimum_required(VERSION 3.14)
+project(angle_kt_square_cpp)
+
+set(CMAKE_CXX_STANDARD 17)
+set(OPTIMIZATION_FLAGS -O3)
+message(STATUS "Using C++ compiler: ${CMAKE_CXX_COMPILER}")
+add_executable(run_mc run_mc.cpp mc_subroutine/mc_read_load_compute.cpp mc_subroutine/mc_read_load_compute.hpp)
+target_compile_options(run_mc PRIVATE ${OPTIMIZATION_FLAGS})
+
+set(Python3_INCLUDE_DIRS "/public/home/hkust_jwliu_1/anaconda3/include/python3.12")
+set(Python3_LIBRARIES "/public/home/hkust_jwliu_1/anaconda3/lib/libpython3.12.so")
+include_directories(${Python3_INCLUDE_DIRS})
+
+set(Boost_NO_SYSTEM_PATHS YES)
+if (Boost_NO_SYSTEM_PATHS)
+    set(Boost_ROOT "/public/home/hkust_jwliu_1/cppLocal/boostBuild")
+    set(Boost_INCLUDE_DIR "/public/home/hkust_jwliu_1/cppLocal/boostBuild/include")
+    set(Boost_LIBRARY_DIR "/public/home/hkust_jwliu_1/cppLocal/boostBuild/lib")
+endif (Boost_NO_SYSTEM_PATHS)
+
+find_package(Boost REQUIRED COMPONENTS python numpy filesystem)
+if(Boost_FOUND)
+    message(STATUS "boost root is: ${Boost_ROOT}")
+    message(STATUS "boost include path is : ${Boost_INCLUDE_DIR}")
+    message(STATUS "boost library path is : ${Boost_LIBRARY_DIR}")
+    message(STATUS "boost libraries is : ${Boost_LIBRARIES}")
+    include_directories(${Boost_INCLUDE_DIR})
+    link_directories(${Boost_LIBRARY_DIR})
+else()
+    message(WARNING "boost not found.")
+endif()
+
+target_link_libraries(run_mc Boost::filesystem Boost::python Boost::numpy ${Python3_LIBRARIES} pthread)
