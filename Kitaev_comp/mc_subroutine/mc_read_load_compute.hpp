@@ -332,7 +332,7 @@ public:
      * and periodically saves data to disk.
      */
     void execute_mc(double *s_init, const int &flushNum);
-
+    
     /**
      * @brief Compute magnetization for all saved configurations in parallel
      *

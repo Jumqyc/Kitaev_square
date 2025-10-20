@@ -1,19 +1,6 @@
 //
 // Created by adada on 9/1/2025.
 //
-#include <array>
-namespace vec // numpy like operations just for simplicity of writing code
-{
-    /*
-    @param a, b: two 3D vectors
-    @return: the dot product of a and b
-    3D vector dot product
-    */
-    inline double dot(const double *a, const double *b)
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-};
 
 #include "mc_read_load_compute.hpp"
 
@@ -240,8 +227,6 @@ void mc_computation::init_and_run()
  * - Sum of all biquadratic diagonal bonds
  * - Sum of all Kitaev x bonds
  * - Sum of all Kitaev y bonds
- *
- * Factor of 0.5 corrects for double-counting (each bond counted from both ends)
  */
 double mc_computation::energy_tot(const double *s_vec)
 {
@@ -255,34 +240,42 @@ double mc_computation::energy_tot(const double *s_vec)
             int yd = (y - 1 + N1) % N1;
             int yu = (y + 1) % N1;
             double dot_prod;
-            double *org_spin = new double[3];
-            double *nn_spin = new double[3];
+            double org_spin_x, org_spin_y, org_spin_z;
 
-            std::memcpy(org_spin, &s_vec[ind(x, y)], 3 * sizeof(double));
+            org_spin_x = s_vec[ind(x, y)];
+            org_spin_y = s_vec[ind(x, y) + 1];
+            org_spin_z = s_vec[ind(x, y) + 2];
 
             // (x+1,y)
-            std::memcpy(nn_spin, &s_vec[ind(xu, y)], 3 * sizeof(double));
-            dot_prod = vec::dot(org_spin, nn_spin);
-            energy += (J11 + J12 * dot_prod) * dot_prod; // nn Heisenberg S_i dot S_j and biquadratic term
-            energy += K * org_spin[0] * nn_spin[0];      // Kitaev term Kx S_{i+e_x}^x S_i^x
+            long nn_site_ind = ind(xu, y);
+
+            dot_prod = org_spin_x * s_vec[nn_site_ind] 
+                        + org_spin_y * s_vec[nn_site_ind + 1] 
+                        + org_spin_z * s_vec[nn_site_ind + 2];
+            energy += (J11 + J12 * dot_prod) * dot_prod;   // nn Heisenberg S_i dot S_j and biquadratic term
+            energy += K * org_spin_x * s_vec[nn_site_ind]; // Kitaev term Kx S_{i+e_x}^x S_i^x
             // (x,y-1)
-            std::memcpy(nn_spin, &s_vec[ind(x, yd)], 3 * sizeof(double));
-            dot_prod = vec::dot(org_spin, nn_spin);
-            energy += (J11 + J12 * dot_prod) * dot_prod; // nn Heisenberg S_i dot S_j and biquadratic term
-            energy += K * org_spin[1] * nn_spin[1];      // Kitaev term Ky S_{i+e_y}^y S_i^y
+            dot_prod = org_spin_x * s_vec[nn_site_ind] 
+                       + org_spin_y * s_vec[nn_site_ind + 1] 
+                       + org_spin_z * s_vec[nn_site_ind + 2];
+            energy += (J11 + J12 * dot_prod) * dot_prod;       // nn Heisenberg S_i dot S_j and biquadratic term
+            energy += K * org_spin_y * s_vec[nn_site_ind + 1]; // Kitaev term Ky S_{i+e_y}^y S_i^y
 
             // nnn interaction, Heisenberg, biquadratic, without Kitaev term
             // (x+1,y+1)
-            std::memcpy(nn_spin, &s_vec[ind(xu, yu)], 3 * sizeof(double));
-            dot_prod = vec::dot(org_spin, nn_spin);
+
+            nn_site_ind = ind(xu, yu);
+            dot_prod = org_spin_x * s_vec[nn_site_ind] 
+                       + org_spin_y * s_vec[nn_site_ind + 1] 
+                       + org_spin_z * s_vec[nn_site_ind + 2];
             energy += (J21 + J22 * dot_prod) * dot_prod; // nnn Heisenberg S_i dot S_j and biquadratic term
             // (x-1,y+1)
-            std::memcpy(nn_spin, &s_vec[ind(xd, yu)], 3 * sizeof(double));
-            dot_prod = vec::dot(org_spin, nn_spin);
-            energy += (J21 + J22 * dot_prod) * dot_prod; // nnn Heisenberg S_i dot S_j and biquadratic term
 
-            delete[] org_spin;
-            delete[] nn_spin;
+            nn_site_ind = ind(xd, yu);
+            dot_prod = org_spin_x * s_vec[nn_site_ind] 
+                       + org_spin_y * s_vec[nn_site_ind + 1] 
+                       + org_spin_z * s_vec[nn_site_ind + 2];
+            energy += (J21 + J22 * dot_prod) * dot_prod; // nnn Heisenberg S_i dot S_j and biquadratic term
         }
     }
     return energy;
@@ -300,81 +293,91 @@ void mc_computation::local_update(unsigned int x, unsigned int y)
     thread_local static std::mt19937 rng{std::random_device{}()};
     thread_local static std::uniform_real_distribution<double> dist{0.0, 1.0};
     // store original spin
-    double *old_spin = new double[3];
-    double *nn_spin = new double[3];
-
-    std::memcpy(old_spin, &s_init[ind(x, y)], 3 * sizeof(double));
 
     // new spin
     const double phi = 6.28318530718f * dist(rng);
     const double theta = std::acos(1.0 - 2.0 * dist(rng));
-    const double *new_spin = new double[3]{std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta)};
+    // const double *new_spin = new double[3]{std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta)};
+    double new_s_x = std::sin(theta) * std::cos(phi);
+    double new_s_y = std::sin(theta) * std::sin(phi);
+    double new_s_z = std::cos(theta);
 
     // calculate energy change
     double dE = 0;
     double old_dot, new_dot;
 
+    long on_site_ind = ind(x, y);
+
     // nn interaction. Heisenberg, biquadratic and Kitaev terms
     // (x-1,y)
-    std::memcpy(nn_spin, &s_init[ind(xd, y)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
-    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot); // nn Heisenberg S_i dot S_j and biquadratic term
-    dE += K * (new_spin[0] - old_spin[0]) * nn_spin[0];            // Kitaev term Kx S_{i+e_x}x ^ S_i^x
+
+    long nn_site_ind = ind(xd, y);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
+    // dE += J11 * (new_dot - old_dot); // nn Heisenberg S_i dot S_j
+    // dE += J12 * (new_dot * new_dot - old_dot * old_dot); // nn biquadratic term
+    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot);   // nn Heisenberg S_i dot S_j and biquadratic term
+    dE += K * (new_s_x - s_init[on_site_ind]) * s_init[nn_site_ind]; // Kitaev term Kx S_{i+e_x}x ^ S_i^x
+
     // (x+1,y)
-    std::memcpy(nn_spin, &s_init[ind(xu, y)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
-    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot); // nn Heisenberg S_i dot S_j and biquadratic term
-    dE += K * (new_spin[0] - old_spin[0]) * nn_spin[0];            // Kitaev term Kx S_{i-e_x}^x  S_i^x
+    nn_site_ind = ind(xu, y);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
+    // dE += J11 * (new_dot - old_dot); // nn Heisenberg S_i dot S_j
+    // dE += J12 * (new_dot * new_dot - old_dot * old_dot); // nn biquadratic term
+    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot);   // nn Heisenberg S_i dot S_j and biquadratic term
+    dE += K * (new_s_x - s_init[on_site_ind]) * s_init[nn_site_ind]; // Kitaev term Kx S_{i+e_x}x ^ S_i^x
 
     // (x,y-1)
-    std::memcpy(nn_spin, &s_init[ind(x, yd)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
-    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot); // nn Heisenberg S_i dot S_j and biquadratic term
-    dE += K * (new_spin[1] - old_spin[1]) * nn_spin[1];            // Kitaev term Ky S_{i+y}^y  S_i^y
+    nn_site_ind = ind(x, yd);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
+    // dE += J11 * (new_dot - old_dot); // nn Heisenberg S_i dot S_j
+    // dE += J12 * (new_dot * new_dot - old_dot * old_dot); // nn biquadratic term
+    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot);           // nn Heisenberg S_i dot S_j and biquadratic term
+    dE += K * (new_s_x - s_init[on_site_ind + 1]) * s_init[nn_site_ind + 1]; // Kitaev term Kx S_{i+e_y}y ^ S_i^y
 
     // (x,y+1)
-    std::memcpy(nn_spin, &s_init[ind(x, yu)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
-    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot); // nn Heisenberg S_i dot S_j and biquadratic term
-    dE += K * (new_spin[1] - old_spin[1]) * nn_spin[1];            // Kitaev term Ky S_{i+y}^y  S_i^y
-
+    nn_site_ind = ind(x, yu);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
+    // dE += J11 * (new_dot - old_dot); // nn Heisenberg S_i dot S_j
+    // dE += J12 * (new_dot * new_dot - old_dot * old_dot); // nn biquadratic term
+    dE += (J11 + J12 * (new_dot + old_dot)) * (new_dot - old_dot);           // nn Heisenberg S_i dot S_j and biquadratic term
+    dE += K * (new_s_x - s_init[on_site_ind + 1]) * s_init[nn_site_ind + 1]; // Kitaev term Kx S_{i+e_y}y ^ S_i^y
     // nnn interaction, Heisenberg, biquadratic, without Kitaev term
+
     // (x-1,y-1)
-    std::memcpy(nn_spin, &s_init[ind(xd, yd)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
+    nn_site_ind = ind(xd, yd);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
     dE += (J21 + J22 * (new_dot + old_dot)) * (new_dot - old_dot); // nnn Heisenberg S_i dot S_j and biquadratic term
 
     // (x+1,y+1)
-    std::memcpy(nn_spin, &s_init[ind(xu, yu)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
+    nn_site_ind = ind(xu, yu);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
     dE += (J21 + J22 * (new_dot + old_dot)) * (new_dot - old_dot); // nnn Heisenberg S_i dot S_j and biquadratic term
 
     // (x-1,y+1)
-    std::memcpy(nn_spin, &s_init[ind(xd, yu)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
+    nn_site_ind = ind(xd, yu);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
     dE += (J21 + J22 * (new_dot + old_dot)) * (new_dot - old_dot); // nnn Heisenberg S_i dot S_j and biquadratic term
 
     // (x+1,y-1)
-    std::memcpy(nn_spin, &s_init[ind(xu, yd)], 3 * sizeof(double));
-    old_dot = vec::dot(old_spin, nn_spin);
-    new_dot = vec::dot(new_spin, nn_spin);
+    nn_site_ind = ind(xu, yd);
+    old_dot = s_init[on_site_ind] * s_init[nn_site_ind] + s_init[on_site_ind + 1] * s_init[nn_site_ind + 1] + s_init[on_site_ind + 2] * s_init[nn_site_ind + 2]; // S_i dot S_j
+    new_dot = new_s_x * s_init[nn_site_ind] + new_s_y * s_init[nn_site_ind + 1] + new_s_z * s_init[nn_site_ind + 2];
     dE += (J21 + J22 * (new_dot + old_dot)) * (new_dot - old_dot); // nnn Heisenberg S_i dot S_j and biquadratic term
-
-    delete[] old_spin;
-    delete[] nn_spin;
-    delete[] new_spin;
 
     // Metropolis, accept with probability exp(-dE/T)
     if (dist(rng) < std::exp(-dE / T))
     {
-        std::memcpy(&s_init[ind(x, y)], new_spin, 3 * sizeof(double));
+        // accept the new spin
+        s_init[on_site_ind] = new_s_x;
+        s_init[on_site_ind + 1] = new_s_y;
+        s_init[on_site_ind + 2] = new_s_z;
     }
 }
 
@@ -519,7 +522,6 @@ void mc_computation::compute_order_parameter(double &val_x, double &val_y, doubl
         sum_y += (this->s_all_ptr[j + 1]) * phase;
         sum_z += (this->s_all_ptr[j + 2]) * phase;
     }
-
     val_x = sum_x / static_cast<double>(lattice_num);
     val_y = sum_y / static_cast<double>(lattice_num);
     val_z = sum_z / static_cast<double>(lattice_num);
